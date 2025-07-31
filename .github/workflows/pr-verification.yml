@@ -1,10 +1,8 @@
-# central-repo: .github/workflows/pr-verification.yml
+# centralspendshield/.github/workflows/pr-verification.yml
 name: PR Verification (All Terraform Modules)
 
 on:
-  workflow_call:
-    # no inputs needed for this simple use-case
-    # you can add inputs if you want to customize paths, etc.
+  workflow_call: {}
 
 jobs:
   find-all-terraform-modules:
@@ -24,11 +22,11 @@ jobs:
               | sort -u
           )
           if [ ${#tf_dirs[@]} -eq 0 ]; then
-            tf_dirs_json='[]'
+            echo "tf_dirs=[]" >> "$GITHUB_OUTPUT"
           else
             tf_dirs_json=$(jq -c -n '$ARGS.positional' --args "${tf_dirs[@]}")
+            echo "tf_dirs=$tf_dirs_json" >> "$GITHUB_OUTPUT"
           fi
-          echo "tf_dirs=$tf_dirs_json" >> "$GITHUB_OUTPUT"
 
   terraform-plan:
     name: Terraform Plan
@@ -51,11 +49,3 @@ jobs:
         working-directory: ${{ matrix.dir }}
       - run: terraform plan -out=plan.out
         working-directory: ${{ matrix.dir }}
-
-   # 2) Emit one flat "PR Verification" status *after* the reusable workflow finishes
-    pr-verification-report:
-      name: PR Verification
-      needs: call-central-pr-verification
-      runs-on: ubuntu-latest
-      steps:
-        - run: echo "✅ PR validation complete"
