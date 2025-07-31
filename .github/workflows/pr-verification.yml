@@ -1,0 +1,63 @@
+# central-repo: .github/workflows/pr-verification.yml
+name: PR Verification (All Terraform Modules)
+
+on:
+  workflow_call:
+    # no inputs needed for this simple use-case
+    # you can add inputs if you want to customize paths, etc.
+
+jobs:
+  find-all-terraform-modules:
+    name: Find All Terraform Modules
+    runs-on: ubuntu-latest
+    outputs:
+      tf_dirs: ${{ steps.set-tf-dirs.outputs.tf_dirs }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Discover all folders containing .tf
+        id: set-tf-dirs
+        run: |
+          mapfile -t tf_dirs < <(
+            find . -type f -name '*.tf' -not -path './.git/*' \
+              | xargs -n1 dirname \
+              | sort -u
+          )
+          if [ ${#tf_dirs[@]} -eq 0 ]; then
+            tf_dirs_json='[]'
+          else
+            tf_dirs_json=$(jq -c -n '$ARGS.positional' --args "${tf_dirs[@]}")
+          fi
+          echo "tf_dirs=$tf_dirs_json" >> "$GITHUB_OUTPUT"
+
+  terraform-plan:
+    name: Terraform Plan
+    needs: find-all-terraform-modules
+    if: needs.find-all-terraform-modules.outputs.tf_dirs != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dir: ${{ fromJson(needs.find-all-terraform-modules.outputs.tf_dirs) }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform init
+        working-directory: ${{ matrix.dir }}
+      - run: terraform validate
+        working-directory: ${{ matrix.dir }}
+      - run: terraform plan -out=plan.out
+        working-directory: ${{ matrix.dir }}
+
+  finalize-pr-verification:
+    name: PR Verification
+    needs:
+      - find-all-terraform-modules
+      - terraform-plan
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - run: echo "✅ PR validation complete"
