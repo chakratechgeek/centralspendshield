@@ -52,12 +52,10 @@ jobs:
       - run: terraform plan -out=plan.out
         working-directory: ${{ matrix.dir }}
 
-  finalize-pr-verification:
-    name: PR Verification
-    needs:
-      - find-all-terraform-modules
-      - terraform-plan
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - run: echo "✅ PR validation complete"
+   # 2) Emit one flat "PR Verification" status *after* the reusable workflow finishes
+    pr-verification-report:
+      name: PR Verification
+      needs: call-central-pr-verification
+      runs-on: ubuntu-latest
+      steps:
+        - run: echo "✅ PR validation complete"
