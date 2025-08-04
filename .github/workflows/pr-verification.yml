@@ -66,6 +66,7 @@ jobs:
           echo "PLAN_OUTPUT<<EOF" >> $GITHUB_OUTPUT
           python3 << 'PYTHON_SCRIPT'
           import json
+          import sys
           
           def get_changed_fields(before, after, path="", action=None):
               changes = []
@@ -92,20 +93,40 @@ jobs:
           
           # Example usage:
           def highlight_changes(resource_changes):
+              if not resource_changes:
+                  print("No resource changes found in the plan.")
+                  return
+                  
+              changes_found = False
               for rc in resource_changes:
                   actions = rc["change"]["actions"]
                   before = rc["change"].get("before", {})
                   after = rc["change"].get("after", {})
                   if actions != ["no-op"]:
+                      changes_found = True
                       print(f"\nResource: {rc['address']} (Actions: {actions})")
                       diffs = get_changed_fields(before, after, action="update" if "update" in actions else "replace")
                       for diff in diffs:
-                          print(f"{diff['key']}: '{diff['before']}' → '{diff['after']}' (action: {diff['action']})")
+                          print(f"  {diff['key']}: '{diff['before']}' → '{diff['after']}' (action: {diff['action']})")
+              
+              if not changes_found:
+                  print("No changes detected in any resources (all no-op).")
           
           # ---- Main ----
-          with open("plan.json") as f:
-              data = json.load(f)
-          highlight_changes(data.get("resource_changes", []))
+          try:
+              with open("plan.json") as f:
+                  data = json.load(f)
+              print(f"Analyzing Terraform plan for directory: ${{ matrix.dir }}")
+              highlight_changes(data.get("resource_changes", []))
+          except FileNotFoundError:
+              print("Error: plan.json file not found")
+              sys.exit(1)
+          except json.JSONDecodeError as e:
+              print(f"Error: Invalid JSON in plan.json - {e}")
+              sys.exit(1)
+          except Exception as e:
+              print(f"Error analyzing plan: {e}")
+              sys.exit(1)
           PYTHON_SCRIPT
           echo "EOF" >> $GITHUB_OUTPUT
         working-directory: ${{ matrix.dir }}
@@ -114,6 +135,10 @@ jobs:
         run: |
           echo "## Terraform Plan Analysis for ${{ matrix.dir }}"
           echo "${{ steps.plan-analysis.outputs.PLAN_OUTPUT }}"
+      
+      - name: Workflow completion status
+        run: |
+          echo "✅ Terraform plan analysis completed successfully for ${{ matrix.dir }}"
       
       - name: Comment PR with Terraform plan changes
         if: github.event_name == 'pull_request'
