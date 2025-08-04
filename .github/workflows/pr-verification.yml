@@ -61,7 +61,7 @@ jobs:
         working-directory: ${{ matrix.dir }}
       
       - name: Copy check.py to current directory
-        run: cp .github/workflows/check.py .
+        run: cp $GITHUB_WORKSPACE/.github/workflows/check.py .
         working-directory: ${{ matrix.dir }}
       
       - name: Run Terraform plan analysis
