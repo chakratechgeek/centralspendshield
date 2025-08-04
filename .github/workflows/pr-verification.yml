@@ -16,7 +16,7 @@ on:
         required: false
         type: string
     secrets:
-      github_token:
+      GITHUB_TOKEN:
         description: 'GitHub token with permissions to comment on the target repository'
         required: true
       AWS_ACCESS_KEY_ID:
@@ -90,7 +90,7 @@ jobs:
         if: ${{ inputs.pr_number }}
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.github_token }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const targetOwner = '${{ inputs.target_repo_owner }}' || context.repo.owner;
             const targetRepo = '${{ inputs.target_repo_name }}' || context.repo.repo;
