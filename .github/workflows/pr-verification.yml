@@ -2,7 +2,12 @@
 name: PR Verification (All Terraform Modules)
 
 on:
-  workflow_call: {}
+  workflow_call:
+    inputs:
+      pr_number:
+        description: 'Pull Request number for commenting'
+        required: false
+        type: string
   pull_request:
     types: [opened, synchronize, reopened]
 
@@ -141,7 +146,7 @@ jobs:
           echo "✅ Terraform plan analysis completed successfully for ${{ matrix.dir }}"
       
       - name: Comment PR with Terraform plan changes
-        if: github.event_name == 'pull_request'
+        if: github.event.pull_request.number || inputs.pr_number
         uses: actions/github-script@v7
         continue-on-error: true
         with:
@@ -155,13 +160,24 @@ jobs:
               \`\`\`
               `;
               
-              await github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: output
-              });
+              // Get PR number from either direct PR event or workflow input
+              const prNumber = context.payload.pull_request?.number || 
+                              '${{ inputs.pr_number }}';
+              
+              if (prNumber && prNumber !== '') {
+                await github.rest.issues.createComment({
+                  issue_number: parseInt(prNumber),
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: output
+                });
+                console.log(`✅ Successfully commented on PR #${prNumber}`);
+              } else {
+                console.log('❌ No PR number available - cannot comment');
+                console.log('Direct PR event:', !!context.payload.pull_request?.number);
+                console.log('Input PR number:', '${{ inputs.pr_number }}');
+              }
             } catch (error) {
-              console.log('Unable to comment on PR. This may be expected when called via workflow_call.');
+              console.log('❌ Failed to comment on PR:', error.message);
               console.log('Plan analysis output:', '${{ steps.plan-analysis.outputs.PLAN_OUTPUT }}');
             }
