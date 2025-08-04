@@ -60,15 +60,11 @@ jobs:
         run: terraform show -json plan.out > plan.json
         working-directory: ${{ matrix.dir }}
       
-      - name: Copy check.py to current directory
-        run: cp $GITHUB_WORKSPACE/.github/workflows/check.py .
-        working-directory: ${{ matrix.dir }}
-      
       - name: Run Terraform plan analysis
         id: plan-analysis
         run: |
           echo "PLAN_OUTPUT<<EOF" >> $GITHUB_OUTPUT
-          python check.py
+          python $GITHUB_WORKSPACE/.github/workflows/check.py
           echo "EOF" >> $GITHUB_OUTPUT
         working-directory: ${{ matrix.dir }}
       
