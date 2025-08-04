@@ -20,18 +20,6 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
-  pr-verification-status:
-    name: PR Verification Status
-    runs-on: ubuntu-latest
-    outputs:
-      status: ${{ steps.set-status.outputs.status }}
-    steps:
-      - name: Set verification status
-        id: set-status
-        run: |
-          echo "status=running" >> $GITHUB_OUTPUT
-          echo "✅ PR Verification workflow started successfully"
-
   find-all-terraform-modules:
     name: Find All Terraform Modules
     runs-on: ubuntu-latest
@@ -57,7 +45,7 @@ jobs:
 
   terraform-plan:
     name: Terraform Plan
-    needs: [pr-verification-status, find-all-terraform-modules]
+    needs: find-all-terraform-modules
     if: needs.find-all-terraform-modules.outputs.tf_dirs != '[]'
     runs-on: ubuntu-latest
     strategy:
@@ -70,238 +58,69 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
+      
       - run: terraform init
         working-directory: ${{ matrix.dir }}
-        continue-on-error: false
-      - run: terraform validate  
+      - run: terraform validate
         working-directory: ${{ matrix.dir }}
-        continue-on-error: false
       - run: terraform plan -out=plan.out
         working-directory: ${{ matrix.dir }}
-        continue-on-error: false
       
       - name: Generate Terraform plan JSON
         run: terraform show -json plan.out > plan.json
         working-directory: ${{ matrix.dir }}
       
-      - name: Run Terraform plan analysis
-        id: plan-analysis
-        continue-on-error: true
+      - name: Display Terraform plan
         run: |
-          echo "PLAN_OUTPUT<<EOF" >> $GITHUB_OUTPUT
-          python3 << 'PYTHON_SCRIPT'
-          import json
-          import sys
-          
-          def get_changed_fields(before, after, path="", action=None):
-              changes = []
-              # Both dicts: recurse common keys
-              if isinstance(before, dict) and isinstance(after, dict):
-                  for key in before.keys() & after.keys():
-                      new_path = f"{path}.{key}" if path else key
-                      changes += get_changed_fields(before[key], after[key], new_path, action)
-              # Both lists: recurse each pair by index
-              elif isinstance(before, list) and isinstance(after, list):
-                  min_len = min(len(before), len(after))
-                  for i in range(min_len):
-                      changes += get_changed_fields(before[i], after[i], f"{path}[{i}]", action)
-              # Leaf: values differ
-              else:
-                  if before != after:
-                      changes.append({
-                          "key": path,
-                          "before": before,
-                          "after": after,
-                          "action": action or "update"
-                      })
-              return changes
-          
-          # Example usage:
-          def highlight_changes(resource_changes):
-              if not resource_changes:
-                  print("No resource changes found in the plan.")
-                  return
-                  
-              changes_found = False
-              for rc in resource_changes:
-                  actions = rc["change"]["actions"]
-                  before = rc["change"].get("before", {})
-                  after = rc["change"].get("after", {})
-                  if actions != ["no-op"]:
-                      changes_found = True
-                      print(f"\nResource: {rc['address']} (Actions: {actions})")
-                      diffs = get_changed_fields(before, after, action="update" if "update" in actions else "replace")
-                      for diff in diffs:
-                          print(f"  {diff['key']}: '{diff['before']}' → '{diff['after']}' (action: {diff['action']})")
-              
-              if not changes_found:
-                  print("No changes detected in any resources (all no-op).")
-          
-          # ---- Main ----
-          try:
-              with open("plan.json") as f:
-                  data = json.load(f)
-              print(f"Analyzing Terraform plan for directory: ${{ matrix.dir }}")
-              highlight_changes(data.get("resource_changes", []))
-          except FileNotFoundError:
-              print("Error: plan.json file not found")
-              print("This might be expected if terraform plan had no output")
-          except json.JSONDecodeError as e:
-              print(f"Error: Invalid JSON in plan.json - {e}")
-              print("Continuing with empty analysis")
-          except Exception as e:
-              print(f"Error analyzing plan: {e}")
-              print("Continuing with error noted")
-          PYTHON_SCRIPT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "## Terraform Plan for ${{ matrix.dir }}"
+          echo "Plan file created successfully"
+          if [ -f plan.json ]; then
+            echo "JSON plan file size: $(wc -c < plan.json) bytes"
+          fi
         working-directory: ${{ matrix.dir }}
       
-      - name: Display plan analysis
-        run: |
-          echo "## Terraform Plan Analysis for ${{ matrix.dir }}"
-          echo "${{ steps.plan-analysis.outputs.PLAN_OUTPUT }}"
-      
-      - name: Workflow completion status
-        run: |
-          echo "✅ Terraform plan analysis completed successfully for ${{ matrix.dir }}"
-      
-      - name: Debug PR commenting info
-        run: |
-          echo "🔍 Debug Info for PR Commenting:"
-          echo "  PR Number (direct): ${{ github.event.pull_request.number }}"
-          echo "  PR Number (input): ${{ inputs.pr_number }}"
-          echo "  Target Owner (input): ${{ inputs.target_repo_owner }}"
-          echo "  Target Repo (input): ${{ inputs.target_repo_name }}"
-          echo "  Context Owner: ${{ github.repository_owner }}"
-          echo "  Context Repo: ${{ github.event.repository.name }}"
-          echo "  Event Name: ${{ github.event_name }}"
-          echo "  Repository: ${{ github.repository }}"
-      
-      - name: Test PR Comment (Always Runs)
+      - name: Comment PR with plan
+        if: inputs.pr_number
         uses: actions/github-script@v7
         continue-on-error: true
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            console.log('=== PR COMMENT TEST ===');
-            console.log('Event name:', context.eventName);
-            console.log('Payload keys:', Object.keys(context.payload));
+            const targetOwner = '${{ inputs.target_repo_owner }}' || context.repo.owner;
+            const targetRepo = '${{ inputs.target_repo_name }}' || context.repo.repo;
+            const prNumber = '${{ inputs.pr_number }}';
             
-            // Try to get PR number from multiple sources
-            const prFromPayload = context.payload.pull_request?.number;
-            const prFromInput = '${{ inputs.pr_number }}';
-            const prFromIssue = context.issue?.number;
+            const message = `## Terraform Plan for \`${{ matrix.dir }}\`
             
-            console.log('PR from payload:', prFromPayload);
-            console.log('PR from input:', prFromInput);
-            console.log('PR from issue:', prFromIssue);
+            ✅ Terraform plan completed successfully.
             
-            const finalPrNumber = prFromPayload || (prFromInput !== '' ? prFromInput : null) || prFromIssue;
+            - **Directory**: \`${{ matrix.dir }}\`
+            - **Status**: Plan generated
+            - **Time**: ${new Date().toISOString()}
+            `;
             
-            console.log('Final PR number:', finalPrNumber);
-            
-            if (finalPrNumber) {
-              const targetOwner = '${{ inputs.target_repo_owner }}' || context.repo.owner;
-              const targetRepo = '${{ inputs.target_repo_name }}' || context.repo.repo;
-              
-              console.log('Target repository:', targetOwner + '/' + targetRepo);
-              
-              try {
-                const result = await github.rest.issues.createComment({
-                  issue_number: parseInt(finalPrNumber),
-                  owner: targetOwner,
-                  repo: targetRepo,
-                  body: '🧪 **Test Comment** - PR verification workflow is working!'
-                });
-                console.log('✅ Test comment created successfully!', result.data.html_url);
-              } catch (error) {
-                console.log('❌ Failed to create test comment:', error.message);
-                console.log('Error details:', error);
-              }
-            } else {
-              console.log('❌ No PR number found - cannot create test comment');
-            }
-      
-      - name: Comment PR with Terraform plan changes
-        uses: actions/github-script@v7
-        continue-on-error: true
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
             try {
-              const output = `## Terraform Plan Changes for \`${{ matrix.dir }}\`
-              
-              \`\`\`
-              ${{ steps.plan-analysis.outputs.PLAN_OUTPUT }}
-              \`\`\`
-              `;
-              
-              // Get PR number from multiple sources
-              const prFromPayload = context.payload.pull_request?.number;
-              const prFromInput = '${{ inputs.pr_number }}';
-              const prFromIssue = context.issue?.number;
-              
-              const prNumber = prFromPayload || (prFromInput && prFromInput !== '' && prFromInput !== 'undefined' ? prFromInput : null) || prFromIssue;
-              
-              console.log('=== PR COMMENTING DEBUG ===');
-              console.log('PR from payload:', prFromPayload);
-              console.log('PR from input:', prFromInput);
-              console.log('PR from issue:', prFromIssue);
-              console.log('Final PR number:', prNumber);
-              
-              if (prNumber) {
-                // Get target repository info - handle empty strings
-                const targetOwner = '${{ inputs.target_repo_owner }}' || context.repo.owner;
-                const targetRepo = '${{ inputs.target_repo_name }}' || context.repo.repo;
-                
-                console.log('Target repository:', targetOwner + '/' + targetRepo);
-                
-                const result = await github.rest.issues.createComment({
+              if (prNumber && prNumber !== '') {
+                await github.rest.issues.createComment({
                   issue_number: parseInt(prNumber),
                   owner: targetOwner,
                   repo: targetRepo,
-                  body: output
+                  body: message
                 });
-                
-                console.log(`✅ Successfully commented on PR #${prNumber} in ${targetOwner}/${targetRepo}`);
-                console.log('Comment URL:', result.data.html_url);
-              } else {
-                console.log('❌ No valid PR number available - cannot comment');
-                console.log('Event name:', context.eventName);
-                console.log('Available context keys:', Object.keys(context.payload));
+                console.log(`✅ Commented on PR #${prNumber} in ${targetOwner}/${targetRepo}`);
               }
             } catch (error) {
-              console.log('❌ Failed to comment on PR:', error.message);
-              console.log('Error status:', error.status);
-              console.log('Error response:', error.response?.data);
-              console.log('This could be due to permissions or repository access issues');
+              console.log('❌ Failed to comment:', error.message);
             }
 
-  pr-verification-complete:
+  pr-verification:
     name: PR Verification
     runs-on: ubuntu-latest
-    needs: [pr-verification-status, find-all-terraform-modules, terraform-plan]
+    needs: [find-all-terraform-modules, terraform-plan]
     if: always()
     steps:
-      - name: Final status check
+      - name: Summary
         run: |
-          echo "🏁 PR Verification workflow completed"
-          echo "Status: ${{ needs.pr-verification-status.outputs.status }}"
-          echo "Find modules result: ${{ needs.find-all-terraform-modules.result }}"
+          echo "✅ PR Verification completed"
+          echo "Terraform modules found: ${{ needs.find-all-terraform-modules.outputs.tf_dirs }}"
           echo "Terraform plan result: ${{ needs.terraform-plan.result }}"
-          
-          # Check if all required jobs succeeded or were skipped
-          if [ "${{ needs.pr-verification-status.result }}" = "success" ] && \
-             [ "${{ needs.find-all-terraform-modules.result }}" = "success" ] && \
-             ( [ "${{ needs.terraform-plan.result }}" = "success" ] || [ "${{ needs.terraform-plan.result }}" = "skipped" ] ); then
-            echo "✅ All checks passed or skipped"
-            exit 0
-          else
-            echo "⚠️ Some checks had issues, but workflow completed"
-            echo "This is expected if there are no Terraform files or other non-critical issues"
-            exit 0
-          fi
