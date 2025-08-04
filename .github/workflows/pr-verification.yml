@@ -6,10 +6,6 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
-permissions:
-  contents: read
-  pull-requests: write
-
 jobs:
   find-all-terraform-modules:
     name: Find All Terraform Modules
@@ -76,22 +72,33 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
         working-directory: ${{ matrix.dir }}
       
+      - name: Display plan analysis
+        run: |
+          echo "## Terraform Plan Analysis for ${{ matrix.dir }}"
+          echo "${{ steps.plan-analysis.outputs.PLAN_OUTPUT }}"
+      
       - name: Comment PR with Terraform plan changes
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
+        continue-on-error: true
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const output = `## Terraform Plan Changes for \`${{ matrix.dir }}\`
-            
-            \`\`\`
-            ${{ steps.plan-analysis.outputs.PLAN_OUTPUT }}
-            \`\`\`
-            `;
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: output
-            });
+            try {
+              const output = `## Terraform Plan Changes for \`${{ matrix.dir }}\`
+              
+              \`\`\`
+              ${{ steps.plan-analysis.outputs.PLAN_OUTPUT }}
+              \`\`\`
+              `;
+              
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: output
+              });
+            } catch (error) {
+              console.log('Unable to comment on PR. This may be expected when called via workflow_call.');
+              console.log('Plan analysis output:', '${{ steps.plan-analysis.outputs.PLAN_OUTPUT }}');
+            }
