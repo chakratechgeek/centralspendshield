@@ -163,9 +163,54 @@ jobs:
           echo "  Context Owner: ${{ github.repository_owner }}"
           echo "  Context Repo: ${{ github.event.repository.name }}"
           echo "  Event Name: ${{ github.event_name }}"
+          echo "  Repository: ${{ github.repository }}"
+      
+      - name: Test PR Comment (Always Runs)
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            console.log('=== PR COMMENT TEST ===');
+            console.log('Event name:', context.eventName);
+            console.log('Payload keys:', Object.keys(context.payload));
+            
+            // Try to get PR number from multiple sources
+            const prFromPayload = context.payload.pull_request?.number;
+            const prFromInput = '${{ inputs.pr_number }}';
+            const prFromIssue = context.issue?.number;
+            
+            console.log('PR from payload:', prFromPayload);
+            console.log('PR from input:', prFromInput);
+            console.log('PR from issue:', prFromIssue);
+            
+            const finalPrNumber = prFromPayload || (prFromInput !== '' ? prFromInput : null) || prFromIssue;
+            
+            console.log('Final PR number:', finalPrNumber);
+            
+            if (finalPrNumber) {
+              const targetOwner = '${{ inputs.target_repo_owner }}' || context.repo.owner;
+              const targetRepo = '${{ inputs.target_repo_name }}' || context.repo.repo;
+              
+              console.log('Target repository:', targetOwner + '/' + targetRepo);
+              
+              try {
+                const result = await github.rest.issues.createComment({
+                  issue_number: parseInt(finalPrNumber),
+                  owner: targetOwner,
+                  repo: targetRepo,
+                  body: '🧪 **Test Comment** - PR verification workflow is working!'
+                });
+                console.log('✅ Test comment created successfully!', result.data.html_url);
+              } catch (error) {
+                console.log('❌ Failed to create test comment:', error.message);
+                console.log('Error details:', error);
+              }
+            } else {
+              console.log('❌ No PR number found - cannot create test comment');
+            }
       
       - name: Comment PR with Terraform plan changes
-        if: github.event.pull_request.number || inputs.pr_number
         uses: actions/github-script@v7
         continue-on-error: true
         with:
@@ -179,35 +224,43 @@ jobs:
               \`\`\`
               `;
               
-              // Get PR number from either direct PR event or workflow input
-              const prNumber = context.payload.pull_request?.number || 
-                              '${{ inputs.pr_number }}';
+              // Get PR number from multiple sources
+              const prFromPayload = context.payload.pull_request?.number;
+              const prFromInput = '${{ inputs.pr_number }}';
+              const prFromIssue = context.issue?.number;
               
-              // Get target repository info - handle empty strings
-              const targetOwner = '${{ inputs.target_repo_owner }}' || context.repo.owner;
-              const targetRepo = '${{ inputs.target_repo_name }}' || context.repo.repo;
+              const prNumber = prFromPayload || (prFromInput && prFromInput !== '' && prFromInput !== 'undefined' ? prFromInput : null) || prFromIssue;
               
-              console.log(`Debug info:`);
-              console.log(`  PR Number: ${prNumber}`);
-              console.log(`  Target Owner: ${targetOwner}`);
-              console.log(`  Target Repo: ${targetRepo}`);
-              console.log(`  Context Owner: ${context.repo.owner}`);
-              console.log(`  Context Repo: ${context.repo.repo}`);
+              console.log('=== PR COMMENTING DEBUG ===');
+              console.log('PR from payload:', prFromPayload);
+              console.log('PR from input:', prFromInput);
+              console.log('PR from issue:', prFromIssue);
+              console.log('Final PR number:', prNumber);
               
-              if (prNumber && prNumber !== '' && prNumber !== 'undefined') {
-                await github.rest.issues.createComment({
+              if (prNumber) {
+                // Get target repository info - handle empty strings
+                const targetOwner = '${{ inputs.target_repo_owner }}' || context.repo.owner;
+                const targetRepo = '${{ inputs.target_repo_name }}' || context.repo.repo;
+                
+                console.log('Target repository:', targetOwner + '/' + targetRepo);
+                
+                const result = await github.rest.issues.createComment({
                   issue_number: parseInt(prNumber),
                   owner: targetOwner,
                   repo: targetRepo,
                   body: output
                 });
+                
                 console.log(`✅ Successfully commented on PR #${prNumber} in ${targetOwner}/${targetRepo}`);
+                console.log('Comment URL:', result.data.html_url);
               } else {
                 console.log('❌ No valid PR number available - cannot comment');
-                console.log('Analysis will still be available in workflow logs');
+                console.log('Event name:', context.eventName);
+                console.log('Available context keys:', Object.keys(context.payload));
               }
             } catch (error) {
               console.log('❌ Failed to comment on PR:', error.message);
+              console.log('Error status:', error.status);
+              console.log('Error response:', error.response?.data);
               console.log('This could be due to permissions or repository access issues');
-              console.log('Analysis output:', '${{ steps.plan-analysis.outputs.PLAN_OUTPUT }}');
             }
