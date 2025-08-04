@@ -7,17 +7,11 @@ on:
         description: 'Pull Request number to comment on'
         required: true
         type: string
-      target_repo_owner:
-        description: 'Owner of the repository where the PR lives (e.g., chakratechgeek)'
-        required: true
-        type: string
-      target_repo_name:
-        description: 'Name of the repository where the PR lives (e.g., sstest)'
-        required: true
-        type: string
+      # If you truly need cross-repo comments, add owner/name inputs and PASS a PAT.
     secrets:
-      PR_COMMENT_TOKEN:          # Fine-grained PAT with Issues & Pull requests: write on target repo
-        required: true
+      # Optional PAT. If not supplied, we fall back to github.token.
+      PR_COMMENT_TOKEN:
+        required: false
       AWS_ACCESS_KEY_ID:
         required: true
       AWS_SECRET_ACCESS_KEY:
@@ -46,8 +40,7 @@ jobs:
         run: |
           mapfile -t tf_dirs < <(
             find . -type f -name '*.tf' -not -path './.git/*' \
-              | xargs -n1 dirname \
-              | sort -u
+              | xargs -n1 dirname | sort -u
           )
           if [ ${#tf_dirs[@]} -eq 0 ]; then
             echo "tf_dirs=[]" >> "$GITHUB_OUTPUT"
@@ -89,10 +82,11 @@ jobs:
         working-directory: ${{ matrix.dir }}
 
       - name: Comment PR with plan result
+        if: ${{ inputs.pr_number }}    # run only if PR number present
         uses: peter-evans/create-or-update-comment@v4
         with:
-          token: ${{ secrets.PR_COMMENT_TOKEN }}
-          repository: ${{ inputs.target_repo_owner }}/${{ inputs.target_repo_name }}
+          # Use PAT if provided; otherwise fallback to the caller repo's github.token
+          token: ${{ secrets.PR_COMMENT_TOKEN || github.token }}
           issue-number: ${{ inputs.pr_number }}
           body: |
             ## Terraform Plan for `${{ matrix.dir }}`
@@ -100,7 +94,7 @@ jobs:
 
             - **Directory**: `${{ matrix.dir }}`
             - **Status**: Plan generated
-            - **Timestamp**: ${{ github.run_id }} / ${{ github.run_number }}
+            - **Run**: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
   pr-verification:
     name: PR Verification Summary
