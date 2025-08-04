@@ -183,13 +183,18 @@ jobs:
               const prNumber = context.payload.pull_request?.number || 
                               '${{ inputs.pr_number }}';
               
-              // Get target repository info
+              // Get target repository info - handle empty strings
               const targetOwner = '${{ inputs.target_repo_owner }}' || context.repo.owner;
               const targetRepo = '${{ inputs.target_repo_name }}' || context.repo.repo;
               
-              console.log(`Attempting to comment on PR #${prNumber} in ${targetOwner}/${targetRepo}`);
+              console.log(`Debug info:`);
+              console.log(`  PR Number: ${prNumber}`);
+              console.log(`  Target Owner: ${targetOwner}`);
+              console.log(`  Target Repo: ${targetRepo}`);
+              console.log(`  Context Owner: ${context.repo.owner}`);
+              console.log(`  Context Repo: ${context.repo.repo}`);
               
-              if (prNumber && prNumber !== '') {
+              if (prNumber && prNumber !== '' && prNumber !== 'undefined') {
                 await github.rest.issues.createComment({
                   issue_number: parseInt(prNumber),
                   owner: targetOwner,
@@ -198,13 +203,11 @@ jobs:
                 });
                 console.log(`✅ Successfully commented on PR #${prNumber} in ${targetOwner}/${targetRepo}`);
               } else {
-                console.log('❌ No PR number available - cannot comment');
-                console.log('Direct PR event:', !!context.payload.pull_request?.number);
-                console.log('Input PR number:', '${{ inputs.pr_number }}');
-                console.log('Context repo:', context.repo.owner + '/' + context.repo.repo);
-                console.log('Target repo:', targetOwner + '/' + targetRepo);
+                console.log('❌ No valid PR number available - cannot comment');
+                console.log('Analysis will still be available in workflow logs');
               }
             } catch (error) {
               console.log('❌ Failed to comment on PR:', error.message);
-              console.log('Plan analysis output:', '${{ steps.plan-analysis.outputs.PLAN_OUTPUT }}');
+              console.log('This could be due to permissions or repository access issues');
+              console.log('Analysis output:', '${{ steps.plan-analysis.outputs.PLAN_OUTPUT }}');
             }
